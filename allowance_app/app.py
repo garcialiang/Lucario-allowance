@@ -78,8 +78,8 @@ def update_allowance(user):
         new_allowance = Transaction(
             date=cursor_date,
             amount=user.weekly_allowance_amount,
-            description="Weekly Allowance (Monday)",
-            category="Allowance",
+            description="Weekly allowance",
+            category="allowance",
             user_id=user.id
         )
         db.session.add(new_allowance)
@@ -152,16 +152,23 @@ def index():
 @app.route('/add_transaction', methods=['POST'])
 @login_required
 def add_transaction():
-    if current_user.role != 'admin': return "Unauthorized", 403
+    if current_user.role != 'admin':
+        return "Unauthorized", 403
         
     amount = float(request.form.get('amount'))
     description = request.form.get('description')
     category = request.form.get('category')
     user_id = request.form.get('user_id')
+    date_str = request.form.get('date') # Get the date string from the form
     
-    # We use current time for manual entry, or allow user to pick date? 
-    # For now, let's assume manual entry is for "Today"
-    trans_date = datetime.utcnow()
+    # Parse the date, or default to now if empty
+    if date_str:
+        try:
+            trans_date = datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            trans_date = datetime.utcnow()
+    else:
+        trans_date = datetime.utcnow()
 
     # CHECK DUPLICATE
     if transaction_exists(user_id, trans_date, amount, description):
@@ -176,6 +183,7 @@ def add_transaction():
         )
         db.session.add(new_trans)
         db.session.commit()
+        flash('Transaction added successfully.')
         
     return redirect(url_for('index'))
 
@@ -284,38 +292,64 @@ def delete_transaction(id):
 @app.route('/analytics')
 @login_required
 def analytics():
-    # 1. Identify the target user (Admin sees son, Son sees self)
     target_user = current_user
     if current_user.role == 'admin':
         target_user = User.query.filter_by(role='user').first()
     
-    # 2. Get ALL transactions (we want the big picture here)
-    transactions = Transaction.query.filter_by(user_id=target_user.id).all()
+    # 1. Base Query
+    query = Transaction.query.filter_by(user_id=target_user.id)
     
-    # 3. Process Data for Charts
+    # 2. Check for Date Filters in URL
+    start_str = request.args.get('start_date')
+    end_str = request.args.get('end_date')
+    
+    # Apply Start Date Filter
+    if start_str:
+        try:
+            s_date = datetime.strptime(start_str, '%Y-%m-%d')
+            query = query.filter(Transaction.date >= s_date)
+        except ValueError:
+            pass # Ignore invalid dates
+
+    # Apply End Date Filter
+    if end_str:
+        try:
+            e_date = datetime.strptime(end_str, '%Y-%m-%d')
+            # Set time to end of day (23:59:59) so we capture transactions on that day
+            e_date = e_date.replace(hour=23, minute=59, second=59)
+            query = query.filter(Transaction.date <= e_date)
+        except ValueError:
+            pass
+
+    transactions = query.all()
+    
+    # 3. Process Data (Same as before)
     spending_by_category = {}
+    earnings_by_category = {} 
     total_earned = 0
     total_spent = 0
     
     for t in transactions:
+        cat = t.category if t.category else "Others"
+        cat = cat.strip().title() 
+
         if t.amount < 0:
-            # SPENDING
             abs_amount = abs(t.amount)
             total_spent += abs_amount
-            
-            # Group by Category
-            cat = t.category if t.category else "Others"
-            cat = cat.strip().title() # Clean up string (e.g. "toys " -> "Toys")
             spending_by_category[cat] = spending_by_category.get(cat, 0) + abs_amount
         else:
-            # EARNING
             total_earned += t.amount
+            earnings_by_category[cat] = earnings_by_category.get(cat, 0) + t.amount
 
+    # Pass the current filter values back to UI so inputs stay filled
     return render_template('analytics.html', 
                            user=current_user,
                            spending_data=spending_by_category,
+                           earnings_data=earnings_by_category, 
                            earned=total_earned, 
-                           spent=total_spent)
+                           spent=total_spent,
+                           start_date=start_str, # <--- Pass these back
+                           end_date=end_str)     # <--- Pass these back
 
 if __name__ == '__main__':
     with app.app_context():

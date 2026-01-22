@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Financial Report</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -13,22 +14,49 @@
         <div class="d-flex align-items-center">
             <img src="{{ url_for('static', filename='profile.jpg') }}" 
                  class="rounded-circle border border-2 border-white me-2"
-                 style="width: 40px; height: 40px; object-fit: cover;">
+                 style="width: 40px; height: 40px; object-fit: cover;"
+                 onerror="this.style.display='none'">
             <span class="navbar-brand mb-0">Analytics & Patterns</span>
         </div>
         <a href="{{ url_for('index') }}" class="btn btn-secondary btn-sm">Back to Dashboard</a>
     </div>
 </nav>
 
-<div class="container">
-    <div class="row">
-        
-        <div class="col-md-6 mb-4">
+<div class="container pb-5">
+
+    <div class="card shadow-sm mb-4 bg-light">
+        <div class="card-body py-3">
+            <form action="{{ url_for('analytics') }}" method="GET" class="row g-2 align-items-center">
+                <div class="col-auto">
+                    <span class="fw-bold text-secondary">Filter Period:</span>
+                </div>
+                <div class="col-auto">
+                    <div class="input-group">
+                        <span class="input-group-text">From</span>
+                        <input type="date" name="start_date" class="form-control" value="{{ start_date if start_date }}">
+                    </div>
+                </div>
+                <div class="col-auto">
+                    <div class="input-group">
+                        <span class="input-group-text">To</span>
+                        <input type="date" name="end_date" class="form-control" value="{{ end_date if end_date }}">
+                    </div>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-primary">Apply</button>
+                    <a href="{{ url_for('analytics') }}" class="btn btn-outline-secondary">Clear</a>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div class="row mb-4">
+        <div class="col-md-6 mb-3">
             <div class="card shadow-sm h-100">
-                <div class="card-header fw-bold">Where is the money going?</div>
+                <div class="card-header fw-bold text-danger">Where the money went (Spending)</div>
                 <div class="card-body">
                     {% if spent > 0 %}
-                        <canvas id="categoryChart"></canvas>
+                        <canvas id="spendingChart"></canvas>
                     {% else %}
                         <p class="text-center text-muted mt-5">No spending records yet.</p>
                     {% endif %}
@@ -36,72 +64,104 @@
             </div>
         </div>
 
-        <div class="col-md-6 mb-4">
+        <div class="col-md-6 mb-3">
             <div class="card shadow-sm h-100">
-                <div class="card-header fw-bold">Earning vs. Spending</div>
+                <div class="card-header fw-bold text-success">How money was earned (Income)</div>
                 <div class="card-body">
-                    <canvas id="summaryChart"></canvas>
+                    {% if earned > 0 %}
+                        <canvas id="earningChart"></canvas>
+                    {% else %}
+                        <p class="text-center text-muted mt-5">No income records yet.</p>
+                    {% endif %}
                 </div>
             </div>
         </div>
+    </div>
 
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card shadow-sm">
+                <div class="card-header fw-bold">Total Income vs. Expenses</div>
+                <div class="card-body">
+                    <div style="height: 300px;">
+                        <canvas id="summaryChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     
-    <div class="alert alert-info text-center">
-        <strong>Net Savings:</strong> ${{ "%.2f"|format(earned - spent) }} 
-        (You have saved {{ "%.0f"|format((earned - spent) / earned * 100) if earned > 0 else 0 }}% of your income!)
+    <div class="alert alert-info text-center mt-4">
+        <strong>Net Savings:</strong> 
+        <span class="{{ 'text-success' if (earned - spent) >= 0 else 'text-danger' }}">
+            ${{ "%.2f"|format(earned - spent) }}
+        </span>
     </div>
 </div>
 
 <script>
-    // --- 1. PREPARE DATA FROM PYTHON ---
-    const spendingData = {{ spending_data|tojson }};
+    // --- 1. DATA FROM PYTHON ---
+    // Use safe parsing for the dictionaries
+    const spendingData = {{ spending_data|tojson|safe }};
+    const earningsData = {{ earnings_data|tojson|safe }};
     const totalEarned = {{ earned }};
     const totalSpent = {{ spent }};
 
-    // --- 2. DRAW PIE CHART (Categories) ---
-    if (totalSpent > 0) {
-        const ctxPie = document.getElementById('categoryChart').getContext('2d');
-        new Chart(ctxPie, {
-            type: 'doughnut', // 'pie' or 'doughnut'
+    // --- 2. SPENDING CHART (Doughnut) ---
+    const spendingCanvas = document.getElementById('spendingChart');
+    if (spendingCanvas && totalSpent > 0) {
+        new Chart(spendingCanvas, {
+            type: 'doughnut',
             data: {
                 labels: Object.keys(spendingData),
                 datasets: [{
                     data: Object.values(spendingData),
-                    backgroundColor: [
-                        '#FF6384', // Red
-                        '#36A2EB', // Blue
-                        '#FFCE56', // Yellow
-                        '#4BC0C0', // Teal
-                        '#9966FF', // Purple
-                        '#FF9F40'  // Orange
-                    ]
+                    backgroundColor: ['#FF6384', '#FF9F40', '#FFCD56', '#C9CBCF', '#36A2EB', '#9966FF']
                 }]
             },
-            options: { responsive: true }
+            options: { responsive: true, maintainAspectRatio: false }
         });
     }
 
-    // --- 3. DRAW BAR CHART (In vs Out) ---
-    const ctxBar = document.getElementById('summaryChart').getContext('2d');
-    new Chart(ctxBar, {
-        type: 'bar',
-        data: {
-            labels: ['Total Earned', 'Total Spent'],
-            datasets: [{
-                label: 'Amount ($)',
-                data: [totalEarned, totalSpent],
-                backgroundColor: ['#28a745', '#dc3545'], // Green for Earn, Red for Spend
-                borderRadius: 5
-            }]
-        },
-        options: {
-            scales: {
-                y: { beginAtZero: true }
+    // --- 3. EARNING CHART (Doughnut) ---
+    const earningCanvas = document.getElementById('earningChart');
+    if (earningCanvas && totalEarned > 0) {
+        new Chart(earningCanvas, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(earningsData),
+                datasets: [{
+                    data: Object.values(earningsData),
+                    backgroundColor: ['#4BC0C0', '#36A2EB', '#9966FF', '#FFCE56', '#28a745', '#FF9F40']
+                }]
             },
-            plugins: { legend: { display: false } }
-        }
-    });
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    }
+
+    // --- 4. SUMMARY BAR CHART ---
+    const summaryCanvas = document.getElementById('summaryChart');
+    if (summaryCanvas) {
+        new Chart(summaryCanvas, {
+            type: 'bar',
+            data: {
+                labels: ['Total Earned', 'Total Spent'],
+                datasets: [{
+                    label: 'Amount ($)',
+                    data: [totalEarned, totalSpent],
+                    backgroundColor: ['#28a745', '#dc3545'],
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                indexAxis: 'y', // Horizontal bar
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { x: { beginAtZero: true } },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
 </script>
 
 </body>
